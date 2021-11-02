@@ -160,7 +160,7 @@ def feature_matching_RANSAC(img1, img2, keypoint_num=None, iter_num=500, thresho
 
         M = my_ls(three_points, kp1, kp2)  # affine matrix M 계산
 
-        M_list = np.array([[M[0][0], M[1][0], M[2][0]], # 3 by 3 을 맞춰주기 위해 [0, 0, 1] 추가
+        M = np.array([[M[0][0], M[1][0], M[2][0]],  # 3 by 3 을 맞춰주기 위해 [0, 0, 1] 추가
                       [M[3][0], M[4][0], M[5][0]],
                       [0, 0, 1]])
 
@@ -171,18 +171,21 @@ def feature_matching_RANSAC(img1, img2, keypoint_num=None, iter_num=500, thresho
             queryInd = match.queryIdx
 
             x, y = kp1[queryInd].pt
-            x_prime, y_prime = kp2[trainInd].pt
+            x_, y_ = kp2[trainInd].pt
 
-            dist = L2_distance(x, x_prime, y, y_prime)
+            xy = np.array([[x, y, 1]]).T
+            xy_prime = np.dot(M, xy)
 
-            if dist > threshold_distance:  # inlier의 개수 파악
+            dist = L2_distance(x_, xy_prime[0][0], y_, xy_prime[1][0])
+
+            if dist < threshold_distance:  # inlier의 개수 파악
                 inlier_cnt += 1
 
-        inliers.append([inlier_cnt, M_list])  # inlier의 개수와 M을 저장
+        inliers.append(inlier_cnt)  # inlier의 개수와 M을 저장
+        M_list.append(M)
 
-    inliers.sort(key=lambda x: -x[0])  # inlier의 내림차순으로 정렬
-
-    best_M = inliers[0][1]
+    print("max inliers : %d" % max(inliers))
+    best_M = M_list[inliers.index(max(inliers))]  # 가장 많은 inlier를 가지는 M을 최종 affine matrix로 채택
 
     result = backward(img1, best_M)
     return result.astype(np.uint8)
@@ -193,10 +196,10 @@ def L2_distance(x1, x2, y1, y2):
 
 
 def main():
-    src = cv2.imread('../Lena.png')
-    src2 = cv2.imread('../LenaFaceShear.png')
-    # src = cv2.imread('./library1.jpg')
-    # src2 = cv2.imread('./library2.jpg')
+    # src = cv2.imread('../Lena.png')
+    # src2 = cv2.imread('../LenaFaceShear.png')
+    src = cv2.imread('./library1.jpg')
+    src2 = cv2.imread('./library2.jpg')
 
     result_RANSAC = feature_matching_RANSAC(src, src2)
     result_LS = feature_matching(src, src2)
