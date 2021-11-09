@@ -5,9 +5,9 @@ import random
 
 def my_padding(src):
     (h, w, c) = src.shape
-    h_pad = 2
+    h_pad = 2  # 5 * 5 Filter로 패딩할 것이므로 2만큼 증가
     w_pad = 2
-    padding_img = np.zeros((h + h_pad * 2, w + w_pad * 2, 3))
+    padding_img = np.zeros((h + h_pad * 2, w + w_pad * 2, c))
     padding_img[h_pad:h + h_pad, w_pad:w + w_pad, :] = src
 
     # repetition padding
@@ -34,9 +34,14 @@ def my_get_Gaussian_filter(fshape, sigma=1):
 
 
 def GaussianFiltering(src, fshape=(5, 5), sigma=1):
+    dst = []
+
     gaus = my_get_Gaussian_filter(fshape, sigma)  # 5 * 5 gaussian mask 생성
-    dst = src * gaus
-    return dst
+
+    for i in range(3):
+        dst.append(np.sum(src[:, :, i] * gaus))
+
+    return np.array(dst)
 
 
 # bilinear interpolation
@@ -48,28 +53,19 @@ def my_bilinear(img, x, y):
     :return: img[x,y]에서의 value (bilinear interpolation으로 구해진)
     '''
 
-    bin_value = [[] for _ in range(5)]
-    index = 0
 
-    for i in range(-2, 3):
-        for j in range(-2, 3):
-            floorX, floorY = int(x - i), int(y - j)
+    floorX, floorY = int(x), int(y)
 
-            t, s = (x - i) - floorX, (y - j) - floorY
+    t, s = x - floorX, y - floorY
 
-            zz = (1 - t) * (1 - s)
-            zo = t * (1 - s)
-            oz = (1 - t) * s
-            oo = t * s
+    zz = (1 - t) * (1 - s)
+    zo = t * (1 - s)
+    oz = (1 - t) * s
+    oo = t * s
 
-            interVal = img[floorY, floorX, :] * zz + img[floorY, floorX + 1, :] * zo + \
-                       img[floorY + 1, floorX, :] * oz + img[floorY + 1, floorX + 1, :] * oo
+    interVal = img[floorY, floorX, :] * zz + img[floorY, floorX + 1, :] * zo + \
+               img[floorY + 1, floorX, :] * oz + img[floorY + 1, floorX + 1, :] * oo
 
-            bin_value[index].append(interVal)
-
-        index += 1
-
-    gaussian_interVal = GaussianFiltering(bin_value)
 
     return interVal
 
@@ -94,6 +90,37 @@ def backward(img1, M):
                 continue
 
             result[row, col, :] = my_bilinear(img1, x_, y_)
+
+    return result
+
+def backward_gaussian(img1, M):
+    h, w, c = img1.shape
+    fsize = 5
+    result = np.zeros((h * 2, w * 2, c))
+
+    guassian_filter = my_get_Gaussian_filter((fsize, fsize))
+    values = np.zeros((fsize, fsize, 3))
+
+    for row in range(h * 2):
+        for col in range(w * 2):
+            xy = (np.linalg.inv(M)).dot(np.array([[col, row, 1]]).T)
+
+            x_ = xy[0, 0]
+            y_ = xy[1, 0]
+
+            for in_row in range(-2, 3):
+                for in_col in range(-2, 3):
+                    sx_ = x_ + in_col
+                    sy_ = y_ + in_row
+
+                    if sx_ < 0 or sx_ + 1 >= w or sy_ < 0 or sy_ + 1 >= h : # bilinear 계산을 위한 좌표의 범위
+                        continue
+
+                    values[in_row + fsize // 2, in_col + fsize // 2, :] = my_bilinear(img1, sx_, sy_)
+
+
+            for i in range(3):
+                result[row, col, i] = np.sum(guassian_filter * values[:, :, i])
 
     return result
 
@@ -163,20 +190,6 @@ def get_matching_keypoints(img1, img2, keypoint_num):
     return kp1, kp2, matches
 
 
-def feature_matching(img1, img2, keypoint_num=None):
-    kp1, kp2, matches = get_matching_keypoints(img1, img2, keypoint_num)
-
-    X = my_ls(matches, kp1, kp2)
-
-    M = np.array([[X[0][0], X[1][0], X[2][0]],
-                  [X[3][0], X[4][0], X[5][0]],
-                  [0, 0, 1]])
-
-    result = backward(img1, M)
-
-    return result.astype(np.uint8)
-
-
 def feature_matching_RANSAC(img1, img2, keypoint_num=None, iter_num=500, threshold_distance=10):
     '''
     :param img1: 변환시킬 이미지
@@ -208,6 +221,9 @@ def feature_matching_RANSAC(img1, img2, keypoint_num=None, iter_num=500, thresho
 
         M = my_ls(three_points, kp1, kp2)  # affine matrix M 계산
 
+        if M is None:
+            continue
+
         M = np.array([[M[0][0], M[1][0], M[2][0]],  # 3 by 3 을 맞춰주기 위해 [0, 0, 1] 추가
                       [M[3][0], M[4][0], M[5][0]],
                       [0, 0, 1]])
@@ -235,7 +251,7 @@ def feature_matching_RANSAC(img1, img2, keypoint_num=None, iter_num=500, thresho
     print("max inliers : %d" % max(inliers))
     best_M = M_list[inliers.index(max(inliers))]  # 가장 많은 inlier를 가지는 M을 최종 affine matrix로 채택
 
-    result = backward(img1, best_M)
+    result = backward_gaussian(img1, best_M)
     return result.astype(np.uint8)
 
 
@@ -246,14 +262,11 @@ def L2_distance(x1, x2, y1, y2):
 def main():
     src = cv2.imread('Lena.png')
     src = cv2.resize(src, None, fx=0.5, fy=0.5)
-    src = my_padding(src)
     src2 = cv2.imread('LenaFaceShear.png')
 
     result_RANSAC = feature_matching_RANSAC(src, src2)
-    result_LS = feature_matching(src, src2)
     cv2.imshow('input', src)
     cv2.imshow('result RANSAC 201701971', result_RANSAC)
-    cv2.imshow('result LS 201701971', result_LS)
     cv2.imshow('goal', src2)
     cv2.waitKey()
     cv2.destroyAllWindows()
