@@ -3,27 +3,7 @@ import cv2
 import random
 
 
-def my_padding(src):
-    (h, w, c) = src.shape
-    h_pad = 2  # 5 * 5 Filter로 패딩할 것이므로 2만큼 증가
-    w_pad = 2
-    padding_img = np.zeros((h + h_pad * 2, w + w_pad * 2, c))
-    padding_img[h_pad:h + h_pad, w_pad:w + w_pad, :] = src
-
-    # repetition padding
-    # up
-    padding_img[:h_pad, w_pad:w_pad + w, :] = src[0, :, :]
-    # down
-    padding_img[h_pad + h:, w_pad:w_pad + w, :] = src[h - 1, :, :]
-    # left
-    padding_img[:, :w_pad, :] = padding_img[:, w_pad:w_pad + 1, :]
-    # right
-    padding_img[:, w_pad + w:, :] = padding_img[:, w_pad + w - 1:w_pad + w, :]
-
-    return padding_img
-
-
-def my_get_Gaussian_filter(fshape, sigma=1):
+def my_get_Gaussian_filter(fshape, sigma=0.5):
     (f_h, f_w) = fshape
     y, x = np.mgrid[-(f_h // 2):(f_h // 2) + 1, -(f_w // 2):(f_w // 2) + 1]
     # 2차 gaussian mask 생성
@@ -31,17 +11,6 @@ def my_get_Gaussian_filter(fshape, sigma=1):
     # mask의 총 합 = 1
     filter_gaus /= np.sum(filter_gaus)
     return filter_gaus
-
-
-def GaussianFiltering(src, fshape=(5, 5), sigma=1):
-    dst = []
-
-    gaus = my_get_Gaussian_filter(fshape, sigma)  # 5 * 5 gaussian mask 생성
-
-    for i in range(3):
-        dst.append(np.sum(src[:, :, i] * gaus))
-
-    return np.array(dst)
 
 
 # bilinear interpolation
@@ -52,7 +21,6 @@ def my_bilinear(img, x, y):
     :param y: interpolation 할 y좌표
     :return: img[x,y]에서의 value (bilinear interpolation으로 구해진)
     '''
-
 
     floorX, floorY = int(x), int(y)
 
@@ -65,7 +33,6 @@ def my_bilinear(img, x, y):
 
     interVal = img[floorY, floorX, :] * zz + img[floorY, floorX + 1, :] * zo + \
                img[floorY + 1, floorX, :] * oz + img[floorY + 1, floorX + 1, :] * oo
-
 
     return interVal
 
@@ -93,10 +60,11 @@ def backward(img1, M):
 
     return result
 
+
 def backward_gaussian(img1, M):
     h, w, c = img1.shape
     fsize = 5
-    result = np.zeros((h * 2, w * 2, c))
+    result = np.zeros((h * 2, w * 2, c))  # 이미지의 크기를 줄이기 전 크기로
 
     guassian_filter = my_get_Gaussian_filter((fsize, fsize))
     values = np.zeros((fsize, fsize, 3))
@@ -113,11 +81,10 @@ def backward_gaussian(img1, M):
                     sx_ = x_ + in_col
                     sy_ = y_ + in_row
 
-                    if sx_ < 0 or sx_ + 1 >= w or sy_ < 0 or sy_ + 1 >= h : # bilinear 계산을 위한 좌표의 범위
+                    if sx_ < 0 or sx_ + 1 >= w or sy_ < 0 or sy_ + 1 >= h:  # bilinear 계산을 위한 좌표의 범위
                         continue
 
                     values[in_row + fsize // 2, in_col + fsize // 2, :] = my_bilinear(img1, sx_, sy_)
-
 
             for i in range(3):
                 result[row, col, i] = np.sum(guassian_filter * values[:, :, i])
